@@ -5,10 +5,11 @@ import ccxt
 from decimal import Decimal
 import pandas as pd
 import talib
+from wickky_logic.wickky import WICKKY
+from wechat.wechat import WECHAT
 from pprint import pprint
 # from utils.positions import Positions
 # 交易所初始化
-
 binance = ccxt.binance({
     'enableRateLimit': True,
     'options': {'defaultType': 'future'}
@@ -27,7 +28,7 @@ class FutureTrader():
         binance.timeout = 20000
         # self.positions = Positions('future_positions.json')
 
-    def creat_order(self,symbol,type,qty,price,side,pos_side,stop_order=False,busd=True):
+    def creat_order(self,symbol,type,qty,price,side,pos_side,stop_order=False,busd=False):
         '''
         symbol : 交易对 BTCUSDT
         type : 订单类型 limit market
@@ -300,6 +301,37 @@ class FutureTrader():
         r = binance.fapiPublicGetDepth({'symbol': symbol, 'limit': limit})
         return r
 
+    def get_open_interset(self, symbol, timeframe):
+        params = {
+            'symbol': symbol,
+            'period': timeframe,
+            'limit': 500
+        }
+        r = binance.fapiDataGetOpenInterestHist(params)
+        new_list = []
+        for data in r:
+            new_data = [0, 1, 2]
+            new_data[0] = data['timestamp']
+            new_data[1] = float(data['sumOpenInterest'])
+            new_data[2] = float(data['sumOpenInterestValue'])
+            new_list.append(new_data)
+        df = pd.DataFrame(new_list,
+                          columns={
+                              'open_time': 0,
+                              'sumOpenInterest': 1,
+                              'sumOpenInterestValue': 2,
+                          })
+        df['open_time'] = pd.to_datetime(df['open_time'],
+                                         unit='ms') + pd.Timedelta(hours=8)
+        df['kama'] = talib.KAMA(df['sumOpenInterest'], timeperiod=14)
+        df['dc_up'] = talib.MAX(df['sumOpenInterest'], 10)
+        df['dc_down'] = talib.MIN(df['sumOpenInterest'], 10)
+
+        data = ta_trade.getKlines(symbol, timeframe=timeframe, isPerp=True)
+        data = ta_trade.getEMA(data)
+        df['close'] = data['close']
+        return df
+
     def get_dead_price(self, symbol,pos_side = 'BOTH'):
         '''
         获取当前持仓的爆仓价格
@@ -382,7 +414,7 @@ class FutureTrader():
         '''
         返回当前币种持仓，带正负号
         '''
-        r = binance.fapiPrivate_get_account({})['positions']
+        r = binance.fapiPrivateV2_get_account({})['positions']
         for item in r:
             if item['symbol'] == symbol and item['positionSide'] == positionSide :
                 return float(item['positionAmt'])
@@ -391,25 +423,27 @@ class FutureTrader():
         '''
         返回当前币种平均持仓成本
         '''
-        r = binance.fapiPrivate_get_account({})['positions']
+        
+        r = binance.fapiPrivateV2_get_account({})['positions']
         for item in r:
             if item['symbol'] == symbol and item['positionSide'] == positionSide:
                 return float(item['entryPrice'])
             
-    def return_symbol_pnl(self, symbol):
+    def return_symbol_pnl(self, symbol,positionSide='BOTH'):
         '''
         返回当前币种利润，带正负号
         '''
-        r = binance.fapiPrivate_get_account({})['positions']
+        positionSide = positionSide.upper()
+        r = binance.fapiPrivateV2_get_account({})['positions']
         for item in r:
-            if item['symbol'] == symbol:
+            if item['symbol'] == symbol and item['positionSide'] == positionSide:
                 return float(item['unrealizedProfit'])
             
     def return_initialMargin(self, symbol):
         '''
         返回当前币种持仓起始保证金
         '''
-        r = binance.fapiPrivate_get_account({})['positions']
+        r = binance.fapiPrivateV2_get_account({})['positions']
         for item in r:
             if item['symbol'] == symbol:
                 return float(item['positionInitialMargin'])
@@ -419,7 +453,7 @@ class FutureTrader():
         返回所有仓位不为0的币种格式(symbol,pos)
         '''
         pos_list = []
-        r = binance.fapiPrivate_get_account({})['positions']
+        r = binance.fapiPrivateV2_get_account({})['positions']
         for item in r:
             if float(item['positionAmt']) !=0:
                 pos_list.append((item['symbol'],float(item['positionAmt'])))
@@ -465,3 +499,5 @@ class FutureTrader():
         print(f'普通划转执行，划转金额{money_1}')
         return money_1
     
+wechat = WECHAT()
+ta_trade = WICKKY()

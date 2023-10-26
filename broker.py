@@ -1,15 +1,16 @@
-import sys
-from binance_gateway import FutureTrader
+from gateway.binance_gateway import FutureTrader
+# from wickky_logic.wickky import WICKKY
 import pandas as pd
 
 class BROKER():
     
     def __init__(self,symbol):
         self.symbol = symbol
-        self.future = FutureTrader('apikey','secert')
+        self.future = FutureTrader('','')
         self.future.get_exchange_info()
+        # self.ta_trade = WICKKY()
         
-    def get_cash(self,busd=True):
+    def get_cash(self,busd=False):
         if busd == True:
             assets = self.future.get_wallet_balance()['assets']
             for item in assets:
@@ -32,7 +33,7 @@ class BROKER():
             bid_price = price
         print(f'{self.symbol}购买，价格{bid_price},数量{size},方向{side}')
         order = self.future.creat_order(self.symbol, 'limit', size, bid_price, 'buy',side,stop_order=stop_order)
-        return (order['orderId'],bid_price)
+        return order
     
     def sell(self,size,side,stop_order=False,price=None):
         prices = self.future.get_book_ticker(self.symbol)
@@ -41,7 +42,7 @@ class BROKER():
             bid_price = price
         print(f'{self.symbol}出售，价格{bid_price},数量{size},方向{side}')
         order =  self.future.creat_order(self.symbol, 'limit', size, bid_price, 'sell', side,stop_order=stop_order)
-        return (order['orderId'],bid_price)
+        return order
     
     def cancel(self):
         self.future.cancel_all_open_order(self.symbol)
@@ -49,6 +50,13 @@ class BROKER():
     def check_order(self, order):
         return self.future.check_order(symbol=self.symbol,order_id=order)
 
+    # def get_data(self,timeframe='3m'):
+    #     # 获取K线数据
+    #     data = self.ta_trade.getKlines(self.symbol,timeframe=timeframe,isPerp=True,limit=100)
+    #     df = self.ta_trade.getEMA(data)[:-1] #舍弃最新的K线
+    #     rev_df = pd.DataFrame(df.values[::-1], columns=df.columns)
+    #     return rev_df
+    
     def get_ticker(self):
         # 获取最新价格
         prices = self.future.get_book_ticker(self.symbol)
