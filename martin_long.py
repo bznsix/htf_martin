@@ -7,7 +7,7 @@ import time
 from pprint import pprint
 params = (
     ('margin', 10), #杠杆倍数
-    ('gap_time', 10), #分成多少份
+    ('gap_time', 5), #分成多少份
     ('kline_interval',60*60*1000), #ms级别K线时间戳
     ('long_win_ratio',0.01) #止盈比例
 )
@@ -89,37 +89,51 @@ class MyStrategy():
         if long_pos > 0:
             for key in self.long_order.keys():
                 if self.long_stop_order.get(key) is None:
-                    self.long_order[key] = self.broker.future.get_order(symbol=self.symbol,order_id=key)
                     # 当前level没有止盈单
-                    # 更新下成交情况
-                    price = float(self.long_order[key]['avgPrice']) * (1+self.params.long_win_ratio)
-                    amount = float(self.long_order[key]['executedQty'])
-                    print(f'创建止盈单,单号:{key},价格{price:.4f},数量{amount:.4f}')
-                    self.long_stop_order[key] = self.broker.sell(amount, 'long',price = price )
+                    # 检测买单是否成交
+                    r = self.broker.check_order(self.long_order[key]['orderId'])[0]
+                    if r  == 'FILLED':
+                        # 成交了就更新买单信息
+                        self.long_order[key] = self.broker.future.get_order(symbol=self.symbol,order_id=key)
+                        price = float(self.long_order[key]['avgPrice']) * (1+self.params.long_win_ratio)
+                        amount = float(self.long_order[key]['executedQty'])
+                        print(f'创建止盈单,单号:{key},价格{price:.4f},数量{amount:.4f}')
+                        self.long_stop_order[key] = self.broker.sell(amount, 'long',price = price)
+                    # else:
+                    #     pprint(f'当前订单还没有成交,{self.long_order[key]}')
 
             # 加仓逻辑
             # print(self.now_gap,close < self.last_buy_price * (1-self.params.long_win_ratio),timestamp_ms > self.last_can_buy)
-            if self.now_gap <= 9 and close < self.last_buy_price * (1-self.params.long_win_ratio) and timestamp_ms > self.last_can_buy:
+            if self.now_gap < self.params.gap_time and close < self.last_buy_price * (1-self.params.long_win_ratio) and timestamp_ms > self.last_can_buy:
                 size = self.start_cash / self.params.gap_time / close
                 print(f'触发加仓，size:{size},当前时间:{timestamp_ms},上次购买{self.last_buy_price},当前是{self.now_gap}次')
                 order = self.broker.buy(size,'long',close*1.001)
                 self.long_order[order['orderId']] = order
                 self.after_create_order(close*1.001)
         
+        keys_to_remove = []
         # 检测止盈单逻辑
         for key,order in self.long_stop_order.items():
             try:
                 r = self.broker.check_order(order['orderId'])[0]
                 if r  == 'FILLED':
                     print(f'第{key}次加仓成功止盈')
-                    del self.long_stop_order[key]
-                    del self.long_order[key]
+                    keys_to_remove.append(key)
                     self.now_gap -= 1
                     # 为了庆祝，我们将时间回退，方便我们继续加仓
                     self.last_can_buy = time.time() * 1000 - self.params.kline_interval
+                    #为了更快的复利，我们在这里更新下起始总资金
+                    self.start_cash = self.broker.get_cash() / (self.params.gap_time - self.now_gap) * self.params.gap_time * self.params.margin
+                    print(f'触发更新起始总资金，起始总资金为->{self.start_cash}')
             except:
                 # 加仓可能会清除止盈订单
                 del self.long_stop_order[key]
+        
+        for key in keys_to_remove:
+            print(f'这一次删除的订单{key}')
+            del self.long_stop_order[key]
+            del self.long_order[key]
+            
         
         buy_price = []
         for key,order in self.long_order.items():
@@ -132,5 +146,4 @@ class MyStrategy():
         # pprint(f'当前时间{timestamp_ms},当前仓位{long_pos}')   
         # pprint(self.long_order)
         # pprint(self.long_stop_order)
-        
         self.save_to_json()
